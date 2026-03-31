@@ -1,0 +1,51 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# ===== Virtual Environment =====
+.venv/
+venv/
+env/
+ENV/
+
+# ===== PyTorch / Deep Learning =====
+# Model checkpoints & weights (large binary files)
+artifacts/checkpoints/
+*.pt
+*.pth
+*.onnx
+*.h5
+
+# Generated/synthetic data (can be re-generated)
+data/generated/
+artifacts/results/
+
+# TensorBoard logs
+runs/
+logs/
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Jupyter Notebook =====
+.ipynb_checkpoints/
+
+# ===== Misc =====
+*.log
+*.tmp
