@@ -52,6 +52,12 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=60, help="Training epochs")
     parser.add_argument("--lr", type=float, default=0.0005, help="Learning rate")
     parser.add_argument("--model", choices=["cnn", "transformer", "both"], default="both")
+    parser.add_argument("--augment", action="store_true",
+                        help="Enable trace augmentation (noise, shift, scaling)")
+    parser.add_argument("--use-autoencoder", action="store_true",
+                        help="Pre-train denoising autoencoder for trace preprocessing")
+    parser.add_argument("--compare-cpa", action="store_true",
+                        help="Compare DL attack with classical CPA")
     parser.add_argument("--output-dir", type=str, default="./artifacts/results/sca_simulated")
     parser.add_argument("--device", type=str, default="auto")
     return parser.parse_args()
@@ -119,12 +125,22 @@ def create_dataloaders(args):
 
 
 def train_model(model, model_name, train_loader, val_loader, args, device):
-    """Train SCA model."""
+    """Train SCA model with optional augmentation."""
     print(f"\n🚀 Training {model_name}...")
     
     model = model.to(device)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Parameters: {num_params:,}")
+    
+    # Setup augmentation
+    augmentor = None
+    if getattr(args, 'augment', False):
+        from utils.preprocessing import TraceAugmentor
+        augmentor = TraceAugmentor(
+            noise_std=0.05, max_shift=3, scale_range=(0.95, 1.05),
+            noise_prob=0.5, shift_prob=0.3, scale_prob=0.3
+        )
+        print(f"  Augmentation: {augmentor}")
     
     criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
@@ -142,6 +158,10 @@ def train_model(model, model_name, train_loader, val_loader, args, device):
         model.train()
         t_loss, t_correct, t_total = 0, 0, 0
         for bx, by in train_loader:
+            # Apply augmentation if enabled
+            if augmentor is not None:
+                bx = augmentor(bx)
+            
             bx, by = bx.to(device), by.to(device)
             optimizer.zero_grad()
             out = model(bx)
@@ -193,6 +213,70 @@ def train_model(model, model_name, train_loader, val_loader, args, device):
     print(f"  ✅ Done in {elapsed:.0f}s. Best val acc: {best_val_acc*100:.2f}%")
     
     return model, history
+
+
+def train_autoencoder(traces_train, args, device):
+    """
+    Pre-train denoising autoencoder on training traces.
+    The encoder will be used as a feature extractor for attack models.
+    """
+    from models.autoencoder import DenoisingAutoencoder
+    import torch.nn.functional as F
+    
+    print("\n🛠️  Pre-training Denoising Autoencoder...")
+    
+    ae = DenoisingAutoencoder(
+        trace_length=args.trace_length, latent_dim=64
+    ).to(device)
+    
+    num_params = sum(p.numel() for p in ae.parameters() if p.requires_grad)
+    print(f"  AE Parameters: {num_params:,}")
+    
+    # Create dataloader from training traces
+    ae_dataset = torch.utils.data.TensorDataset(
+        torch.tensor(traces_train, dtype=torch.float32)
+    )
+    ae_loader = DataLoader(ae_dataset, batch_size=args.batch_size, shuffle=True,
+                            num_workers=0, pin_memory=True)
+    
+    optimizer = optim.Adam(ae.parameters(), lr=0.001)
+    ae_epochs = min(20, args.epochs // 3)  # Don't spend too long on AE
+    
+    for epoch in range(1, ae_epochs + 1):
+        ae.train()
+        total_loss = 0
+        for (batch,) in ae_loader:
+            batch = batch.to(device)
+            noisy = DenoisingAutoencoder.add_noise(batch, noise_factor=0.3)
+            reconstructed = ae(noisy)
+            loss = F.mse_loss(reconstructed, batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * len(batch)
+        
+        avg_loss = total_loss / len(traces_train)
+        if epoch % 5 == 0 or epoch == 1:
+            print(f"  AE Epoch {epoch:3d}/{ae_epochs} | MSE Loss: {avg_loss:.6f}")
+    
+    print(f"  ✅ Autoencoder pre-training done.")
+    return ae
+
+
+def extract_ae_features(ae, traces, device, batch_size=256):
+    """
+    Extract features from autoencoder encoder for downstream models.
+    Returns: np.array (N, 128) — encoder features
+    """
+    ae.eval()
+    features = []
+    with torch.no_grad():
+        for start in range(0, len(traces), batch_size):
+            end = min(start + batch_size, len(traces))
+            batch = torch.tensor(traces[start:end], dtype=torch.float32).to(device)
+            feat = ae.get_features(batch)  # (batch, 128)
+            features.append(feat.cpu().numpy())
+    return np.concatenate(features, axis=0)
 
 
 def compute_ge_curve(model, test_data, device, max_traces=2000, step=50):
@@ -302,6 +386,28 @@ def run_experiment(args):
             multiple_runs=ge_results
         )
     
+    # ---- CPA Comparison ----
+    if getattr(args, 'compare_cpa', False) and ge_results:
+        print("\n📊 Comparing DL vs CPA...")
+        from attacks.classical import CPA
+        
+        cpa = CPA(target_byte=args.target_byte)
+        cpa_traces_list, cpa_ge_list = cpa.ge_vs_traces(
+            test_data['traces'][:2000], test_data['plaintexts'][:2000],
+            true_key_byte, step=50, max_traces=2000
+        )
+        ge_results['CPA (classical)'] = (cpa_traces_list, cpa_ge_list)
+        
+        # Plot combined comparison
+        plot_ge_vs_traces(
+            None, None,
+            save_path=os.path.join(args.output_dir, "dl_vs_cpa_comparison.png"),
+            title=f"DL vs CPA Comparison (SNR={args.snr})",
+            multiple_runs=ge_results
+        )
+        
+        print(f"  CPA final rank: {cpa_ge_list[-1] if cpa_ge_list else 'N/A'}")
+    
     # ---- Save results ----
     summary = {
         'experiment': 'simulated_sca',
@@ -309,6 +415,8 @@ def run_experiment(args):
         'trace_length': args.trace_length,
         'num_traces': args.num_traces,
         'true_key_byte': true_key_byte,
+        'augmentation': getattr(args, 'augment', False),
+        'autoencoder': getattr(args, 'use_autoencoder', False),
         'results': results,
     }
     with open(os.path.join(args.output_dir, "results.json"), 'w') as f:

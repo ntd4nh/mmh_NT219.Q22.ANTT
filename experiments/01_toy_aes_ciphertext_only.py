@@ -52,6 +52,8 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     parser.add_argument("--model", choices=["cnn", "transformer", "both"], default="both",
                         help="Model to train")
+    parser.add_argument("--augment", action="store_true",
+                        help="Enable data augmentation (noise injection)")
     parser.add_argument("--output-dir", type=str, default="./artifacts/results/ciphertext_only",
                         help="Output directory")
     parser.add_argument("--device", type=str, default="auto", help="Device (auto/cuda/cpu)")
@@ -59,6 +61,9 @@ def parse_args():
 
 
 def get_device(device_str):
+    if device_str == "dml":
+        import torch_directml
+        return torch_directml.device()
     if device_str == "auto":
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return torch.device(device_str)
@@ -117,14 +122,18 @@ def create_dataloaders(args):
     return train_loader, val_loader, test_loader, key
 
 
-def train_epoch(model, train_loader, criterion, optimizer, device):
-    """Train for one epoch."""
+def train_epoch(model, train_loader, criterion, optimizer, device, augmentor=None):
+    """Train for one epoch with optional data augmentation."""
     model.train()
     total_loss = 0
     correct = 0
     total = 0
     
     for batch_x, batch_y in train_loader:
+        # Apply augmentation if enabled
+        if augmentor is not None:
+            batch_x = augmentor(batch_x)
+        
         batch_x = batch_x.to(device)
         batch_y = batch_y.to(device)
         
@@ -190,6 +199,14 @@ def train_model(model, model_name, train_loader, val_loader, args, device):
     print(f"  Parameters: {num_params:,}")
     print(f"  Device: {device}")
     
+    # Setup augmentation if enabled
+    augmentor = None
+    if getattr(args, 'augment', False):
+        from utils.preprocessing import TraceAugmentor
+        augmentor = TraceAugmentor(noise_std=0.05, noise_prob=0.5,
+                                    shift_prob=0.0, scale_prob=0.0)
+        print(f"  Augmentation: {augmentor}")
+    
     criterion = nn.CrossEntropyLoss(label_smoothing=0.05)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
@@ -209,7 +226,7 @@ def train_model(model, model_name, train_loader, val_loader, args, device):
     
     for epoch in range(1, args.epochs + 1):
         # Train
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device, augmentor)
         
         # Validate
         val_loss, val_acc, _, _ = evaluate(model, val_loader, criterion, device)

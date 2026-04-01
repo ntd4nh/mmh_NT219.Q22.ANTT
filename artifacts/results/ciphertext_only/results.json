@@ -1,0 +1,20 @@
+{
+  "experiment": "ciphertext_only",
+  "num_rounds": 2,
+  "target_byte": 0,
+  "true_key_byte": 102,
+  "train_samples": 50000,
+  "device": "cuda",
+  "SmallCNN": {
+    "test_accuracy": 1.0,
+    "test_loss": 0.05312332473397255,
+    "random_baseline": 0.00390625,
+    "improvement_over_random": 256.0
+  },
+  "CryptoTransformer": {
+    "test_accuracy": 1.0,
+    "test_loss": 0.04761834980249405,
+    "random_baseline": 0.00390625,
+    "improvement_over_random": 256.0
+  }
+}

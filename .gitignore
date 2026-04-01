@@ -18,16 +18,20 @@ ENV/
 # ===== PyTorch / Deep Learning =====
 # Model checkpoints & weights (large binary files)
 artifacts/checkpoints/
-*.pt
-*.pth
 *.onnx
 *.h5
 
 # Generated/synthetic data (can be re-generated)
 data/generated/
-artifacts/results/
+
+# Training results — KEEP these for team visibility!
+# artifacts/results/ is NOT ignored so plots & JSON are committed
+# But ignore large model weight files inside results
+artifacts/results/**/*.pth
+artifacts/results/**/*.pt
 
 # TensorBoard logs
+artifacts/logs/
 runs/
 logs/
 
@@ -49,3 +53,9 @@ desktop.ini
 # ===== Misc =====
 *.log
 *.tmp
+
+# ===== Old setup files (instructions now in README) =====
+run.bat
+setup.bat
+setup.ps1
+*.pdf

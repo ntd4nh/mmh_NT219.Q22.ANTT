@@ -1,0 +1,10 @@
+{
+  "experiment": "chosen_plaintext",
+  "num_rounds": 3,
+  "target_byte": 0,
+  "results": {
+    "SmallCNN": 0.0027699435938759063,
+    "Transformer": 0.003877921031426269,
+    "Random Baseline": 0.00390625
+  }
+}
