@@ -17,16 +17,6 @@
 | **Đề tài** | Deep Learning cho Phân tích Mật mã AES |
 | **Trường** | Trường Đại học Công nghệ Thông tin — ĐHQG TP.HCM |
 
-### Thành viên nhóm
-
-| Họ và tên | MSSV |
-|---|---|
-| Nguyễn Tấn Danh | 24520262 |
-| Nguyễn Thị Tuyết Nhi | 24521263 |
-| Nguyễn Quốc Trường | 24521896 |
-
----
-
 ## Mục lục
 
 - [Tổng quan](#tổng-quan)
